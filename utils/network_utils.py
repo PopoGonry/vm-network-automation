@@ -331,4 +331,99 @@ class WindowsNetworkManager:
                 return False
         except Exception as e:
             self.logger.error(f"[{vm_name}] Connection verification failed: {e}")
+            return False
+    
+    # PowerShell Remoting용 메서드들
+    def detect_interfaces_powershell(self, ip: str, user: str, password: str, 
+                                   vm_name: Optional[str] = None, powershell_manager=None) -> List[str]:
+        """PowerShell을 사용하여 Windows에서 연결된 네트워크 인터페이스 이름들을 반환합니다."""
+        cmd = 'netsh interface show interface'
+        out, _ = powershell_manager.run_command(ip, user, password, cmd, vm_name)
+        if out:
+            lines = out.splitlines()
+            candidates = []
+            self.logger.debug(f"[Windows] Interface detection output:\n{out}")
+            
+            for line in lines:
+                # ANSI 이스케이프 코드 제거
+                clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', line)
+                clean_line = re.sub(r'\x1b\[[0-9]*[a-zA-Z]', '', clean_line)
+                clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', clean_line)
+                # 추가로 특수 문자 제거
+                clean_line = clean_line.replace('\x1b[?25h', '').replace('\x1b[6;1H', '')
+                
+                # 영문/한글 모두 대응
+                if (('Connected' in clean_line or '연결됨' in clean_line) and 
+                    ('Dedicated' in clean_line or '전용' in clean_line)):
+                    parts = clean_line.split()
+                    if parts:
+                        interface_name = parts[-1]
+                        # 따옴표 제거
+                        interface_name = interface_name.strip('"')
+                        candidates.append(interface_name)
+                        self.logger.debug(f"[Windows] Found interface: {interface_name}")
+            
+            if candidates:
+                self.logger.info(f"[Windows] Detected interfaces: {candidates}")
+                return candidates
+        
+        # 기본값들
+        default_interfaces = ["Ethernet0", "Ethernet", "이더넷", "로컬 영역 연결", "Local Area Connection"]
+        self.logger.warning(f"[Windows] No interfaces detected, using defaults: {default_interfaces}")
+        return default_interfaces
+    
+    def configure_dhcp_powershell(self, ip: str, vm_name: str, user: str, password: str, 
+                                 iface: str, powershell_manager) -> bool:
+        """PowerShell을 사용한 DHCP 설정"""
+        try:
+            out1, err1 = powershell_manager.run_command(ip, user, password, 
+                                                      f'netsh interface ip set address "{iface}" dhcp', vm_name)
+            out2, err2 = powershell_manager.run_command(ip, user, password, 
+                                                      f'netsh interface ip set dns "{iface}" dhcp', vm_name)
+            
+            self.logger.info(f"[{vm_name}] DHCP configuration completed for {iface}")
+            return True
+        except Exception as e:
+            self.logger.error(f"[{vm_name}] DHCP configuration failed for {iface}: {e}")
+            return False
+    
+    def configure_static_powershell(self, ip: str, vm_name: str, user: str, password: str, 
+                                   iface: str, cfg: Dict[str, Any], powershell_manager) -> bool:
+        """PowerShell을 사용한 정적 IP 설정"""
+        try:
+            # 네트워크 설정 명령어들을 한 번에 실행
+            network_commands = [
+                f'netsh interface ip set address "{iface}" static {cfg["ip"]} {cfg["subnet_mask"]} {cfg["gateway"]}',
+                f'netsh interface ip set dns "{iface}" static {cfg["dns"]}',
+                f'netsh interface ip add dns "{iface}" {cfg["secondary_dns"]} index=2'
+            ]
+            
+            # 모든 네트워크 설정 명령어 실행
+            self.logger.info(f"[{vm_name}] Executing network configuration commands for {iface}...")
+            for i, cmd in enumerate(network_commands):
+                out, err = powershell_manager.run_command(ip, user, password, cmd, vm_name)
+                if out is not None:
+                    self.logger.debug(f"[{vm_name}] Command {i+1} successful")
+                else:
+                    self.logger.warning(f"[{vm_name}] Command {i+1} failed, but continuing...")
+            
+            self.logger.info(f"[{vm_name}] Static IP configuration completed for {iface}")
+            return True
+        except Exception as e:
+            self.logger.error(f"[{vm_name}] Static IP configuration failed for {iface}: {e}")
+            return False
+    
+    def verify_connection_powershell(self, new_ip: str, vm_name: str, user: str, password: str, 
+                                   powershell_manager) -> bool:
+        """PowerShell을 사용한 연결 확인"""
+        try:
+            test_out, _ = powershell_manager.run_command(new_ip, user, password, 'ipconfig', vm_name)
+            if test_out is not None:
+                self.logger.info(f"[{vm_name}] [SUCCESS] PowerShell connection to new IP {new_ip} successful")
+                return True
+            else:
+                self.logger.warning(f"[{vm_name}] [FAILED] PowerShell connection to new IP {new_ip} failed")
+                return False
+        except Exception as e:
+            self.logger.error(f"[{vm_name}] PowerShell connection verification error: {e}")
             return False 

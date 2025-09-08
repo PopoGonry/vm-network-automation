@@ -7,31 +7,39 @@
     "subnet_mask": "255.255.255.0"
   },
   "timeouts": {
-    "ssh_connection": 2,
-    "network_scan": 0.5,
-    "ping_short": 30,
-    "ping_medium": 50,
-    "ping_long": 100
+    "ssh_connection": 1,
+    "network_scan": 0.1,
+    "ping_short": 10,
+    "ping_medium": 20,
+    "ping_long": 30
   },
   "retry": {
-    "ssh_attempts": 2,
-    "ssh_delay": 0.05,
-    "max_retry_attempts": 1
+    "ssh_attempts": 6,
+    "ssh_delay": 0.02,
+    "max_retry_attempts": 10
   },
   "waits": {
-    "arp_refresh": 1,
-    "arp_lookup": 1,
-    "interface_restart": 2,
-    "network_stabilization": 1,
-    "dhcp_assignment": 2,
-    "ip_change": 0.05
+    "arp_refresh": 0.1,
+    "arp_lookup": 0.1,
+    "interface_restart": 1,
+    "network_stabilization": 0.2,
+    "dhcp_assignment": 1,
+    "ip_change": 0.02
   },
   "performance": {
-    "arp_workers": 200,
-    "ping_test_workers": 80,
-    "network_scan_workers": 200,
-    "vm_processing_workers_multiplier": 10,
-    "max_vm_processing_workers": 40
+    "arp_workers": 1000,
+    "ping_test_workers": 500,
+    "network_scan_workers": 1000,
+    "vm_processing_workers_multiplier": 30,
+    "max_vm_processing_workers": 150
+  },
+  "system_timeouts": {
+    "ip_cache_timeout": 30,
+    "total_execution_timeout": 90,
+    "vm_processing_timeout": 50,
+    "vm_individual_timeout": 6,
+    "powershell_timeout": 1,
+    "connectivity_test_min_time": 5
   },
   "interfaces": {
     "linux_default": "ens33",

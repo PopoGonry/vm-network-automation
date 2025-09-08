@@ -171,6 +171,26 @@ class LoggingConfig:
         self.backup_count = logging_config.get('backup_count', self.backup_count)
 
 @dataclass
+class SystemTimeoutConfig:
+    """시스템 타임아웃 설정을 관리하는 클래스"""
+    ip_cache_timeout: int = 60
+    total_execution_timeout: int = 120
+    vm_processing_timeout: int = 30
+    vm_individual_timeout: int = 3
+    powershell_timeout: int = 2
+    connectivity_test_min_time: int = 5
+    
+    def load_from_config(self, config: Dict[str, Any]) -> None:
+        """설정에서 시스템 타임아웃 값 로드"""
+        system_timeouts = config.get('system_timeouts', {})
+        self.ip_cache_timeout = system_timeouts.get('ip_cache_timeout', self.ip_cache_timeout)
+        self.total_execution_timeout = system_timeouts.get('total_execution_timeout', self.total_execution_timeout)
+        self.vm_processing_timeout = system_timeouts.get('vm_processing_timeout', self.vm_processing_timeout)
+        self.vm_individual_timeout = system_timeouts.get('vm_individual_timeout', self.vm_individual_timeout)
+        self.powershell_timeout = system_timeouts.get('powershell_timeout', self.powershell_timeout)
+        self.connectivity_test_min_time = system_timeouts.get('connectivity_test_min_time', self.connectivity_test_min_time)
+
+@dataclass
 class NetworkConfig:
     """네트워크 설정을 관리하는 클래스"""
     base_network: str = "192.168.32"
@@ -287,7 +307,7 @@ def validate_config(cfg: Dict[str, Any]) -> bool:
 def load_system_config(path: str, timeout_config: TimeoutConfig, network_config: NetworkConfig,
                       performance_config: PerformanceConfig, wait_config: WaitConfig,
                       retry_config: RetryConfig, interface_config: InterfaceConfig,
-                      logging_config: LoggingConfig) -> None:
+                      logging_config: LoggingConfig, system_timeout_config: SystemTimeoutConfig) -> None:
     """시스템 설정 파일을 로드합니다."""
     try:
         with open(path, 'r', encoding='utf-8') as f:
@@ -301,6 +321,7 @@ def load_system_config(path: str, timeout_config: TimeoutConfig, network_config:
         retry_config.load_from_config(cfg)
         interface_config.load_from_config(cfg)
         logging_config.load_from_config(cfg)
+        system_timeout_config.load_from_config(cfg)
         
     except FileNotFoundError:
         raise ConfigValidationError(f"System config file not found: {path}")
@@ -340,9 +361,9 @@ def load_vm_config(path: str, network_config: NetworkConfig) -> Dict[str, Any]:
 class IPCache:
     """IP 주소 캐싱 시스템"""
     
-    def __init__(self, cache_timeout: int = 300):
+    def __init__(self, system_timeout_config: SystemTimeoutConfig):
         self.cache: Dict[str, Tuple[str, float]] = {}
-        self.cache_timeout = cache_timeout
+        self.cache_timeout = system_timeout_config.ip_cache_timeout
     
     def get(self, mac: str) -> Optional[str]:
         """캐시에서 IP 주소 가져오기"""
@@ -410,6 +431,7 @@ class SSHManager:
                 delay = self.retry_config.ssh_delay * (attempt + 1)
                 time.sleep(delay)
         return None, None
+
 
 # === IP Discovery Strategy ===
 class IPDiscoveryStrategy:
@@ -638,6 +660,7 @@ def main():
     retry_config = RetryConfig()
     interface_config = InterfaceConfig()
     logging_config = LoggingConfig()
+    system_timeout_config = SystemTimeoutConfig()
     
     # 전체 실행 시간 측정 시작
     start_time = datetime.now()
@@ -646,14 +669,14 @@ def main():
     try:
         # 시스템 설정 로드
         load_system_config(CONFIG_FILE, timeout_config, network_config, performance_config, 
-                          wait_config, retry_config, interface_config, logging_config)
+                          wait_config, retry_config, interface_config, logging_config, system_timeout_config)
         
         # VM 설정 로드
         configs = load_vm_config(VM_CONFIG_FILE, network_config)
         logger.info(f"Loaded configuration for {len(configs)} VMs")
         
         # IP 캐시 초기화
-        ip_cache = IPCache()
+        ip_cache = IPCache(system_timeout_config)
         
         # SSH 매니저 초기화
         ssh_manager = SSHManager(timeout_config, retry_config, logger)
@@ -680,34 +703,34 @@ def main():
             futures = {executor.submit(process_vm, vm_name, cfg, timeout_config, network_config, 
                                      wait_config, performance_config, retry_config,
                                      ssh_manager, network_utils, linux_manager, windows_manager, 
-                                     ip_cache, logger, active_ips): vm_name 
+                                     ip_cache, system_timeout_config, logger, active_ips): vm_name 
                       for vm_name, cfg in configs.items()}
             
-            # 40초 타임아웃으로 futures 처리 (연결성 테스트를 위해 20초 여유)
+            # 설정된 타임아웃으로 futures 처리
             try:
-                for future in as_completed(futures, timeout=40):
+                for future in as_completed(futures, timeout=system_timeout_config.vm_processing_timeout):
                     vm_name = futures[future]
                     try:
-                        result = future.result(timeout=5)  # 각 VM당 최대 5초 대기
+                        result = future.result(timeout=system_timeout_config.vm_individual_timeout)
                         vm_results.append(result)
                     except Exception as e:
                         logger.error(f"[{vm_name}] Exception: {e}")
                         # 예외 발생 시에도 실패 결과 추가
                         vm_results.append(VMProcessResult(vm_name=vm_name, success=False, failure_reason=f"처리 타임아웃 또는 예외: {str(e)}"))
             except Exception as e:
-                logger.warning(f"VM processing timed out after 40 seconds: {e}")
+                logger.warning(f"VM processing timed out after {system_timeout_config.vm_processing_timeout} seconds: {e}")
                 # 아직 완료되지 않은 futures들에 대해 타임아웃 결과 추가
                 for future, vm_name in futures.items():
                     if not future.done():
                         future.cancel()
-                        vm_results.append(VMProcessResult(vm_name=vm_name, success=False, failure_reason="처리 타임아웃 (40초 초과)"))
+                        vm_results.append(VMProcessResult(vm_name=vm_name, success=False, failure_reason=f"처리 타임아웃 ({system_timeout_config.vm_processing_timeout}초 초과)"))
         
         # 모든 VM 설정 완료 후 연결성 테스트 (15초 제한)
         successful_vms = [result for result in vm_results if result.success]
         connectivity_matrix = {}
         if successful_vms:
-            remaining_time = 60 - (datetime.now() - start_time).total_seconds()
-            if remaining_time > 10:  # 최소 10초는 남겨둠
+            remaining_time = system_timeout_config.total_execution_timeout - (datetime.now() - start_time).total_seconds()
+            if remaining_time > system_timeout_config.connectivity_test_min_time:
                 logger.info(f"Starting connectivity test with {remaining_time:.1f} seconds remaining")
                 # 연결성 테스트용 딕셔너리 생성
                 connectivity_configs = {}
@@ -754,7 +777,7 @@ def process_vm(vm_name: str, cfg: Dict[str, Any], timeout_config: TimeoutConfig,
                network_config: NetworkConfig, wait_config: WaitConfig,
                performance_config: PerformanceConfig, retry_config: RetryConfig,
                ssh_manager: SSHManager, network_utils, linux_manager, windows_manager, 
-               ip_cache: IPCache, logger: logging.Logger, active_ips: List[str]) -> VMProcessResult:
+               ip_cache: IPCache, system_timeout_config: SystemTimeoutConfig, logger: logging.Logger, active_ips: List[str]) -> VMProcessResult:
     """개별 VM 처리 함수"""
     logger.info(f"[{vm_name}] START")
     
@@ -797,41 +820,30 @@ def process_vm(vm_name: str, cfg: Dict[str, Any], timeout_config: TimeoutConfig,
         if os_type == 'linux':
             new_ip = configure_linux_network(current_ip, vm_name, cfg, ssh_manager, linux_manager, wait_config, logger)
         else:
+            # Windows VM도 SSH 사용
             new_ip = configure_windows_network(current_ip, vm_name, cfg, ssh_manager, windows_manager, wait_config, logger)
         
         # 4) IP 변경 후 재연결
-        if os_type == 'linux':
-            final_ip = wait_for_ip_change_and_reconnect(current_ip, new_ip, vm_name, 
-                                                       cfg['user'], cfg['pass'], cfg['port'], ssh_manager, wait_config, retry_config, logger)
-        else:
-            final_ip = new_ip
-            logger.info(f"[{vm_name}] Using new IP from Windows network configuration: {final_ip}")
-            
-            # Windows에서도 새로운 IP로 SSH 연결이 성공했는지 한 번 더 확인
-            if final_ip != current_ip:
-                logger.info(f"[{vm_name}] Verifying SSH connection to new Windows IP: {final_ip}")
-                verify_out, _ = ssh_manager.run_command(final_ip, cfg['user'], cfg['pass'], 
-                                                      'echo "Windows IP verification"', cfg['port'], vm_name)
-                if verify_out is None:
-                    logger.warning(f"[{vm_name}] SSH verification failed for new IP {final_ip}, will use configured IP anyway")
-                    final_ip = new_ip
-                else:
-                    logger.info(f"[{vm_name}] SSH verification successful for new IP {final_ip}")
-            else:
-                logger.info(f"[{vm_name}] IP unchanged, using current IP: {final_ip}")
+        final_ip = wait_for_ip_change_and_reconnect(current_ip, new_ip, vm_name, 
+                                                   cfg['user'], cfg['pass'], cfg['port'], ssh_manager, wait_config, retry_config, logger)
         
         # 5) 네트워크 설정 검증
         verification_result = verify_network_configuration(final_ip, vm_name, cfg, os_type, ssh_manager, logger)
+        
         if not verification_result['success']:
             logger.error(f"[{vm_name}] Network configuration verification failed: {verification_result['reason']}")
             return VMProcessResult(vm_name=vm_name, success=False, failure_reason=f"네트워크 설정 검증 실패: {verification_result['reason']}")
         
         # 6) 새로운 IP로 방화벽 설정
-        set_firewall(final_ip, vm_name, cfg['user'], cfg['pass'], cfg['port'], os_type, ssh_manager, logger)
+        set_firewall(final_ip, vm_name, cfg['user'], cfg['pass'], cfg['port'], os_type, ssh_manager, system_timeout_config, logger)
         
         # 7) 최종 연결성 테스트 및 로깅
-        cmd = 'hostname -I' if os_type == 'linux' else 'ipconfig'
+        if os_type == 'linux':
+            cmd = 'hostname -I'
+        else:
+            cmd = 'ipconfig'
         final_ip_output, _ = ssh_manager.run_command(final_ip, cfg['user'], cfg['pass'], cmd, cfg['port'], vm_name)
+        
         reachable = network_utils.test_connectivity(final_ip, vm_name)
         
         status = {'current_ip': final_ip_output, 'reachable': reachable, 'os_type': os_type, 'final_ip': final_ip}
@@ -898,6 +910,7 @@ def configure_linux_network(ip: str, vm_name: str, cfg: Dict[str, Any],
     new_ip = cfg['ip'] if cfg['mode']=='static' else linux_manager.fetch_dhcp_ip(ip, vm_name, cfg['user'], cfg['pass'], cfg['port'], iface, ssh_manager)
     
     return new_ip
+
 
 def configure_windows_network(ip: str, vm_name: str, cfg: Dict[str, Any], 
                              ssh_manager: SSHManager, windows_manager, wait_config: WaitConfig,
@@ -1090,8 +1103,9 @@ def verify_network_configuration(ip: str, vm_name: str, cfg: Dict[str, Any],
         logger.error(f"[{vm_name}] Network verification error: {e}")
         return {'success': False, 'reason': f'검증 중 오류 발생: {str(e)}'}
 
+
 def set_firewall(ip: str, vm_name: str, user: str, password: str, port: int, 
-                os_type: str, ssh_manager: SSHManager, logger: logging.Logger) -> None:
+                os_type: str, ssh_manager: SSHManager, system_timeout_config: SystemTimeoutConfig, logger: logging.Logger) -> None:
     """방화벽을 설정합니다."""
     if os_type == 'linux':
         ssh_manager.run_command(ip, user, password, 'sudo ufw allow proto icmp', port, vm_name)
@@ -1104,7 +1118,7 @@ def set_firewall(ip: str, vm_name: str, user: str, password: str, port: int,
             ps_command = f"Invoke-Command -ComputerName {ip} -Credential (New-Object System.Management.Automation.PSCredential('{user}', (ConvertTo-SecureString '{password}' -AsPlainText -Force))) -ScriptBlock {{{cmd}}}"
             try:
                 result = subprocess.run(['powershell', '-Command', ps_command], 
-                                      capture_output=True, text=True, timeout=5)
+                                      capture_output=True, text=True, timeout=system_timeout_config.powershell_timeout)
                 logger.info(f"[{vm_name}] PowerShell firewall configuration completed")
             except Exception as e:
                 logger.error(f"[{vm_name}] PowerShell firewall configuration failed: {e}")
