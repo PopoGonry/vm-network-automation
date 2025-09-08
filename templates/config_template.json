@@ -1,0 +1,44 @@
+{
+  "network": {
+    "base_network": "192.168.32",
+    "gateway": "192.168.32.2",
+    "dns_primary": "8.8.8.8",
+    "dns_secondary": "8.8.4.4",
+    "subnet_mask": "255.255.255.0"
+  },
+  "timeouts": {
+    "ssh_connection": 2,
+    "network_scan": 0.5,
+    "ping_short": 30,
+    "ping_medium": 50,
+    "ping_long": 100
+  },
+  "retry": {
+    "ssh_attempts": 2,
+    "ssh_delay": 0.05,
+    "max_retry_attempts": 1
+  },
+  "waits": {
+    "arp_refresh": 1,
+    "arp_lookup": 1,
+    "interface_restart": 2,
+    "network_stabilization": 1,
+    "dhcp_assignment": 2,
+    "ip_change": 0.05
+  },
+  "performance": {
+    "arp_workers": 200,
+    "ping_test_workers": 80,
+    "network_scan_workers": 200,
+    "vm_processing_workers_multiplier": 10,
+    "max_vm_processing_workers": 40
+  },
+  "interfaces": {
+    "linux_default": "ens33",
+    "windows_defaults": ["Ethernet0", "Ethernet", "이더넷", "로컬 영역 연결", "Local Area Connection"]
+  },
+  "logging": {
+    "max_log_size_mb": 10,
+    "backup_count": 5
+  }
+}

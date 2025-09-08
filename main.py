@@ -31,19 +31,11 @@ from pathlib import Path
 
 # === Configuration ===
 CONFIG_FILE = 'config.json'
+VM_CONFIG_FILE = 'vm_config.json'
 
-LOG_FILE = 'log/network_log.json'
+LOG_FILE = 'logs/network_log.json'
 
 # === Constants ===
-DEFAULT_TIMEOUTS = {
-    'ssh': 2,
-    'ssh_retry_count': 1,
-    'ssh_retry_delay': 0.5,
-    'ping': 1,
-    'ip_change_wait': 1,
-    'network_scan_timeout': 0.2
-}
-
 MAX_LOG_SIZE = 10  # MB
 LOG_BACKUP_COUNT = 5
 
@@ -82,22 +74,101 @@ class VMProcessResult:
 @dataclass
 class TimeoutConfig:
     """타임아웃 설정을 관리하는 클래스"""
-    ssh_timeout: int = DEFAULT_TIMEOUTS['ssh']
-    ssh_retry_count: int = DEFAULT_TIMEOUTS['ssh_retry_count']
-    ssh_retry_delay: float = DEFAULT_TIMEOUTS['ssh_retry_delay']
-    ping_timeout: int = DEFAULT_TIMEOUTS['ping']
-    ip_change_wait: int = DEFAULT_TIMEOUTS['ip_change_wait']
-    network_scan_timeout: float = DEFAULT_TIMEOUTS['network_scan_timeout']
+    ssh_connection: int = 1
+    network_scan: float = 1
+    ping_short: int = 50
+    ping_medium: int = 100
+    ping_long: int = 200
     
     def load_from_config(self, config: Dict[str, Any]) -> None:
         """설정에서 타임아웃 값 로드"""
         timeouts = config.get('timeouts', {})
-        self.ssh_timeout = timeouts.get('ssh', self.ssh_timeout)
-        self.ssh_retry_count = timeouts.get('ssh_retry_count', self.ssh_retry_count)
-        self.ssh_retry_delay = timeouts.get('ssh_retry_delay', self.ssh_retry_delay)
-        self.ping_timeout = timeouts.get('ping', self.ping_timeout)
-        self.ip_change_wait = timeouts.get('ip_change_wait', self.ip_change_wait)
-        self.network_scan_timeout = timeouts.get('network_scan_timeout', self.network_scan_timeout)
+        self.ssh_connection = timeouts.get('ssh_connection', self.ssh_connection)
+        self.network_scan = timeouts.get('network_scan', self.network_scan)
+        self.ping_short = timeouts.get('ping_short', self.ping_short)
+        self.ping_medium = timeouts.get('ping_medium', self.ping_medium)
+        self.ping_long = timeouts.get('ping_long', self.ping_long)
+
+@dataclass
+class PerformanceConfig:
+    """성능 설정을 관리하는 클래스"""
+    arp_workers: int = 254
+    ping_test_workers: int = 100
+    network_scan_workers: int = 254
+    vm_processing_workers_multiplier: int = 12
+    max_vm_processing_workers: int = 48
+    
+    def load_from_config(self, config: Dict[str, Any]) -> None:
+        """설정에서 성능 값 로드"""
+        performance = config.get('performance', {})
+        self.arp_workers = performance.get('arp_workers', self.arp_workers)
+        self.ping_test_workers = performance.get('ping_test_workers', self.ping_test_workers)
+        self.network_scan_workers = performance.get('network_scan_workers', self.network_scan_workers)
+        self.vm_processing_workers_multiplier = performance.get('vm_processing_workers_multiplier', self.vm_processing_workers_multiplier)
+        self.max_vm_processing_workers = performance.get('max_vm_processing_workers', self.max_vm_processing_workers)
+
+@dataclass
+class WaitConfig:
+    """대기 시간 설정을 관리하는 클래스"""
+    arp_refresh: float = 2
+    arp_lookup: float = 1.5
+    interface_restart: float = 3
+    network_stabilization: float = 1.5
+    dhcp_assignment: float = 3
+    ip_change: float = 0.1
+    
+    def load_from_config(self, config: Dict[str, Any]) -> None:
+        """설정에서 대기 시간 값 로드"""
+        waits = config.get('waits', {})
+        self.arp_refresh = waits.get('arp_refresh', self.arp_refresh)
+        self.arp_lookup = waits.get('arp_lookup', self.arp_lookup)
+        self.interface_restart = waits.get('interface_restart', self.interface_restart)
+        self.network_stabilization = waits.get('network_stabilization', self.network_stabilization)
+        self.dhcp_assignment = waits.get('dhcp_assignment', self.dhcp_assignment)
+        self.ip_change = waits.get('ip_change', self.ip_change)
+
+@dataclass
+class RetryConfig:
+    """재시도 설정을 관리하는 클래스"""
+    ssh_attempts: int = 3
+    ssh_delay: float = 0.01
+    max_retry_attempts: int = 2
+    
+    def load_from_config(self, config: Dict[str, Any]) -> None:
+        """설정에서 재시도 값 로드"""
+        retry = config.get('retry', {})
+        self.ssh_attempts = retry.get('ssh_attempts', self.ssh_attempts)
+        self.ssh_delay = retry.get('ssh_delay', self.ssh_delay)
+        self.max_retry_attempts = retry.get('max_retry_attempts', self.max_retry_attempts)
+
+@dataclass
+class InterfaceConfig:
+    """인터페이스 설정을 관리하는 클래스"""
+    linux_default: str = "ens33"
+    windows_defaults: List[str] = None
+    
+    def __post_init__(self):
+        if self.windows_defaults is None:
+            self.windows_defaults = ["Ethernet0", "Ethernet", "이더넷", "로컬 영역 연결", "Local Area Connection"]
+    
+    def load_from_config(self, config: Dict[str, Any]) -> None:
+        """설정에서 인터페이스 값 로드"""
+        interfaces = config.get('interfaces', {})
+        self.linux_default = interfaces.get('linux_default', self.linux_default)
+        self.windows_defaults = interfaces.get('windows_defaults', self.windows_defaults)
+
+
+@dataclass
+class LoggingConfig:
+    """로깅 설정을 관리하는 클래스"""
+    max_log_size_mb: int = 10
+    backup_count: int = 5
+    
+    def load_from_config(self, config: Dict[str, Any]) -> None:
+        """설정에서 로깅 값 로드"""
+        logging_config = config.get('logging', {})
+        self.max_log_size_mb = logging_config.get('max_log_size_mb', self.max_log_size_mb)
+        self.backup_count = logging_config.get('backup_count', self.backup_count)
 
 @dataclass
 class NetworkConfig:
@@ -132,7 +203,7 @@ def setup_logging() -> logging.Logger:
         logger.removeHandler(handler)
     
     # 로그 디렉토리 생성
-    log_dir = Path('log')
+    log_dir = Path('logs')
     log_dir.mkdir(exist_ok=True)
     
     # Console handler
@@ -141,7 +212,7 @@ def setup_logging() -> logging.Logger:
     
     # File handler with rotation
     fh = RotatingFileHandler(
-        'log/netconfig_improved.log', 
+        'logs/netconfig_improved.log', 
         maxBytes=MAX_LOG_SIZE*1024*1024, 
         backupCount=LOG_BACKUP_COUNT, 
         encoding='utf-8'
@@ -213,17 +284,38 @@ def validate_config(cfg: Dict[str, Any]) -> bool:
     return True
 
 # === Configuration Loading ===
-def load_config(path: str, timeout_config: TimeoutConfig, network_config: NetworkConfig) -> Dict[str, Any]:
-    """설정 파일을 로드하고 검증합니다."""
+def load_system_config(path: str, timeout_config: TimeoutConfig, network_config: NetworkConfig,
+                      performance_config: PerformanceConfig, wait_config: WaitConfig,
+                      retry_config: RetryConfig, interface_config: InterfaceConfig,
+                      logging_config: LoggingConfig) -> None:
+    """시스템 설정 파일을 로드합니다."""
     try:
         with open(path, 'r', encoding='utf-8') as f:
             cfg = json.load(f)
         
-        # 타임아웃 및 네트워크 설정 로드
+        # 모든 설정 로드
         timeout_config.load_from_config(cfg)
         network_config.load_from_config(cfg)
+        performance_config.load_from_config(cfg)
+        wait_config.load_from_config(cfg)
+        retry_config.load_from_config(cfg)
+        interface_config.load_from_config(cfg)
+        logging_config.load_from_config(cfg)
         
-        # VM 설정만 추출
+    except FileNotFoundError:
+        raise ConfigValidationError(f"System config file not found: {path}")
+    except json.JSONDecodeError as e:
+        raise ConfigValidationError(f"Invalid JSON in system config file: {e}")
+    except Exception as e:
+        raise ConfigValidationError(f"Error loading system config: {e}")
+
+def load_vm_config(path: str, network_config: NetworkConfig) -> Dict[str, Any]:
+    """VM 설정 파일을 로드하고 검증합니다."""
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+        
+        # VM 설정 추출
         vm_configs = cfg.get('vms', {})
         
         # 설정 검증
@@ -238,11 +330,11 @@ def load_config(path: str, timeout_config: TimeoutConfig, network_config: Networ
         
         return vm_configs
     except FileNotFoundError:
-        raise ConfigValidationError(f"Config file not found: {path}")
+        raise ConfigValidationError(f"VM config file not found: {path}")
     except json.JSONDecodeError as e:
-        raise ConfigValidationError(f"Invalid JSON in config file: {e}")
+        raise ConfigValidationError(f"Invalid JSON in VM config file: {e}")
     except Exception as e:
-        raise ConfigValidationError(f"Error loading config: {e}")
+        raise ConfigValidationError(f"Error loading VM config: {e}")
 
 # === IP Cache System ===
 class IPCache:
@@ -275,8 +367,9 @@ class IPCache:
 class SSHManager:
     """SSH 연결 관리 클래스"""
     
-    def __init__(self, timeout_config: TimeoutConfig, logger: logging.Logger):
+    def __init__(self, timeout_config: TimeoutConfig, retry_config: RetryConfig, logger: logging.Logger):
         self.timeout_config = timeout_config
+        self.retry_config = retry_config
         self.logger = logger
     
     def run_command(self, ip: str, user: str, password: str, command: str, 
@@ -290,10 +383,10 @@ class SSHManager:
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             client.connect(
                 ip, port=port, username=user, password=password,
-                allow_agent=False, look_for_keys=False, timeout=self.timeout_config.ssh_timeout
+                allow_agent=False, look_for_keys=False, timeout=self.timeout_config.ssh_connection
             )
             stdin, stdout, stderr = client.exec_command(
-                command, get_pty=True, timeout=self.timeout_config.ssh_timeout
+                command, get_pty=True, timeout=self.timeout_config.ssh_connection
             )
             stdin.write(password + '\n')
             stdin.flush()
@@ -308,13 +401,13 @@ class SSHManager:
     def run_with_retry(self, ip: str, user: str, password: str, command: str, 
                       port: int = 22, vm_name: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
         """SSH 명령어를 재시도와 함께 실행합니다."""
-        for attempt in range(self.timeout_config.ssh_retry_count):
+        for attempt in range(self.retry_config.ssh_attempts):
             out, err = self.run_command(ip, user, password, command, port, vm_name)
             if out is not None:
                 return out, err
-            if attempt < self.timeout_config.ssh_retry_count - 1:
-                self.logger.info(f"[{vm_name}] SSH retry {attempt + 1}/{self.timeout_config.ssh_retry_count} for {ip}")
-                delay = self.timeout_config.ssh_retry_delay * (attempt + 1)
+            if attempt < self.retry_config.ssh_attempts - 1:
+                self.logger.info(f"[{vm_name}] SSH retry {attempt + 1}/{self.retry_config.ssh_attempts} for {ip}")
+                delay = self.retry_config.ssh_delay * (attempt + 1)
                 time.sleep(delay)
         return None, None
 
@@ -324,12 +417,15 @@ class IPDiscoveryStrategy:
     
     def __init__(self, mac: str, vm_name: str, cfg: Dict[str, Any], 
                  network_config: NetworkConfig, timeout_config: TimeoutConfig, 
+                 wait_config: WaitConfig, performance_config: PerformanceConfig,
                  logger: logging.Logger, active_ips: List[str]):
         self.mac = mac
         self.vm_name = vm_name
         self.cfg = cfg
         self.network_config = network_config
         self.timeout_config = timeout_config
+        self.wait_config = wait_config
+        self.performance_config = performance_config
         self.logger = logger
         self.active_ips = active_ips
     
@@ -338,7 +434,7 @@ class IPDiscoveryStrategy:
         try:
             self.logger.info(f"[{self.vm_name}] Refreshing ARP table...")
             subprocess.run('arp -d', shell=True, capture_output=True)
-            time.sleep(2)
+            time.sleep(self.wait_config.arp_refresh)
             
             # 네트워크 스캔으로 ARP 테이블 갱신
             network_base = self.network_config.get_network_range()
@@ -346,15 +442,22 @@ class IPDiscoveryStrategy:
             def ping_host(ip: str) -> bool:
                 try:
                     result = subprocess.run(
-                        ['ping', '-n', '1', '-w', '50', ip], 
-                        capture_output=True, timeout=self.timeout_config.network_scan_timeout
+                        ['ping', '-n', '1', '-w', str(self.timeout_config.ping_short), ip], 
+                        capture_output=True, timeout=self.timeout_config.network_scan
                     )
                     return result.returncode == 0
-                except:
+                except subprocess.TimeoutExpired:
+                    self.logger.debug(f"[{self.vm_name}] Ping timeout for {ip}")
+                    return False
+                except subprocess.CalledProcessError as e:
+                    self.logger.debug(f"[{self.vm_name}] Ping failed for {ip}: {e}")
+                    return False
+                except Exception as e:
+                    self.logger.error(f"[{self.vm_name}] Unexpected error pinging {ip}: {e}")
                     return False
             
             # 병렬로 ping 스캔 실행 (극한 성능 모드)
-            arp_workers = min(254, 254)  # 최대 254개 워커로 ARP 갱신 극한 성능
+            arp_workers = min(self.performance_config.arp_workers, 254)  # 설정된 워커 수로 ARP 갱신
             with ThreadPoolExecutor(max_workers=arp_workers) as executor:
                 futures = []
                 for i in range(1, 255):
@@ -364,7 +467,7 @@ class IPDiscoveryStrategy:
                 for future in as_completed(futures):
                     future.result()
             
-            time.sleep(1.5)
+            time.sleep(self.wait_config.arp_lookup)
             
             # 다시 ARP 조회
             arp = subprocess.check_output('arp -a', shell=True, encoding='cp949', errors='ignore')
@@ -422,8 +525,8 @@ class IPDiscoveryStrategy:
         def ping_and_check_mac(test_ip: str) -> Optional[str]:
             try:
                 result = subprocess.run(
-                    ['ping', '-n', '1', '-w', '100', test_ip], 
-                    capture_output=True, timeout=0.5
+                        ['ping', '-n', '1', '-w', str(self.timeout_config.ping_medium), test_ip], 
+                        capture_output=True, timeout=self.timeout_config.network_scan
                 )
                 if result.returncode == 0:
                     try:
@@ -439,17 +542,25 @@ class IPDiscoveryStrategy:
                             if pattern in arp_result:
                                 self.logger.info(f"[{self.vm_name}] Found matching MAC {pattern} for IP {test_ip}")
                                 return test_ip
-                    except:
-                        pass
+                    except subprocess.CalledProcessError as e:
+                        self.logger.debug(f"[{self.vm_name}] ARP command failed for {test_ip}: {e}")
+                    except UnicodeDecodeError as e:
+                        self.logger.debug(f"[{self.vm_name}] ARP output decode error for {test_ip}: {e}")
+                    except Exception as e:
+                        self.logger.error(f"[{self.vm_name}] Unexpected error checking ARP for {test_ip}: {e}")
                     # MAC 매칭 실패 시 None 반환
                     self.logger.debug(f"[{self.vm_name}] Ping successful but no MAC match for {test_ip}")
                     return None
-            except:
-                pass
+            except subprocess.TimeoutExpired:
+                self.logger.debug(f"[{self.vm_name}] Ping timeout for {test_ip}")
+            except subprocess.CalledProcessError as e:
+                self.logger.debug(f"[{self.vm_name}] Ping failed for {test_ip}: {e}")
+            except Exception as e:
+                self.logger.error(f"[{self.vm_name}] Unexpected error pinging {test_ip}: {e}")
             return None
         
         # ThreadPoolExecutor를 사용하여 병렬로 ping 테스트 (극한 성능)
-        with ThreadPoolExecutor(max_workers=100) as executor:
+        with ThreadPoolExecutor(max_workers=self.performance_config.ping_test_workers) as executor:
             futures = [executor.submit(ping_and_check_mac, ip) for ip in common_ips]
             for future in as_completed(futures):
                 result = future.result()
@@ -472,7 +583,7 @@ class IPDiscoveryStrategy:
 
 # === Global Network Scan ===
 def perform_global_network_scan(network_config: NetworkConfig, timeout_config: TimeoutConfig, 
-                                logger: logging.Logger) -> List[str]:
+                                performance_config: PerformanceConfig, logger: logging.Logger) -> List[str]:
     """전체 네트워크를 한 번만 스캔하여 활성 IP 목록을 반환합니다."""
     try:
         network_base = network_config.get_network_range()
@@ -481,15 +592,22 @@ def perform_global_network_scan(network_config: NetworkConfig, timeout_config: T
         def scan_host(ip: str) -> Optional[str]:
             try:
                 result = subprocess.run(
-                    ['ping', '-n', '1', '-w', '50', ip], 
-                    capture_output=True, timeout=timeout_config.network_scan_timeout
+                    ['ping', '-n', '1', '-w', str(timeout_config.ping_short), ip], 
+                    capture_output=True, timeout=timeout_config.network_scan
                 )
                 return ip if result.returncode == 0 else None
-            except:
+            except subprocess.TimeoutExpired:
+                logger.debug(f"Ping timeout for {ip}")
+                return None
+            except subprocess.CalledProcessError as e:
+                logger.debug(f"Ping failed for {ip}: {e}")
+                return None
+            except Exception as e:
+                logger.error(f"Unexpected error pinging {ip}: {e}")
                 return None
         
         # 병렬로 네트워크 스캔 (극한 성능 모드)
-        scan_workers = min(254, 254)  # 최대 254개 워커로 네트워크 스캔 극한 성능
+        scan_workers = min(performance_config.network_scan_workers, 254)  # 설정된 워커 수로 네트워크 스캔
         with ThreadPoolExecutor(max_workers=scan_workers) as executor:
             futures = []
             for i in range(1, 255):
@@ -515,42 +633,54 @@ def main():
     # 설정 객체 초기화
     timeout_config = TimeoutConfig()
     network_config = NetworkConfig()
+    performance_config = PerformanceConfig()
+    wait_config = WaitConfig()
+    retry_config = RetryConfig()
+    interface_config = InterfaceConfig()
+    logging_config = LoggingConfig()
     
     # 전체 실행 시간 측정 시작
     start_time = datetime.now()
     logger.info(f"=== Network Configuration Started at {start_time.strftime('%Y-%m-%d %H:%M:%S')} ===")
     
     try:
-        # 설정 로드
-        configs = load_config(CONFIG_FILE, timeout_config, network_config)
+        # 시스템 설정 로드
+        load_system_config(CONFIG_FILE, timeout_config, network_config, performance_config, 
+                          wait_config, retry_config, interface_config, logging_config)
+        
+        # VM 설정 로드
+        configs = load_vm_config(VM_CONFIG_FILE, network_config)
         logger.info(f"Loaded configuration for {len(configs)} VMs")
         
         # IP 캐시 초기화
         ip_cache = IPCache()
         
         # SSH 매니저 초기화
-        ssh_manager = SSHManager(timeout_config, logger)
+        ssh_manager = SSHManager(timeout_config, retry_config, logger)
         
         # 네트워크 유틸리티 초기화
-        from util.network_utils import NetworkUtils, LinuxNetworkManager, WindowsNetworkManager
+        from utils.network_utils import NetworkUtils, LinuxNetworkManager, WindowsNetworkManager
         network_utils = NetworkUtils(logger)
         linux_manager = LinuxNetworkManager(logger)
         windows_manager = WindowsNetworkManager(logger)
         
         # 전체 네트워크 스캔 (한 번만 실행)
         logger.info("=== Starting global network scan ===")
-        active_ips = perform_global_network_scan(network_config, timeout_config, logger)
+        active_ips = perform_global_network_scan(network_config, timeout_config, performance_config, logger)
         logger.info(f"Global network scan completed. Found {len(active_ips)} active IPs: {active_ips}")
         
         # VM 처리 결과 저장
         vm_results: List[VMProcessResult] = []
         
         # 병렬로 VM 처리 (60초 타임아웃 적용) - 극한 성능 워커 수
-        optimized_workers = min(len(configs) * 12, 48)  # VM당 12개씩, 최대 48개로 극한 성능
+        optimized_workers = min(len(configs) * performance_config.vm_processing_workers_multiplier, 
+                               performance_config.max_vm_processing_workers)
         logger.info(f"Using {optimized_workers} workers for {len(configs)} VMs (extreme performance mode)")
         with ThreadPoolExecutor(max_workers=optimized_workers) as executor:
             futures = {executor.submit(process_vm, vm_name, cfg, timeout_config, network_config, 
-                                     ssh_manager, network_utils, linux_manager, windows_manager, ip_cache, logger, active_ips): vm_name 
+                                     wait_config, performance_config, retry_config,
+                                     ssh_manager, network_utils, linux_manager, windows_manager, 
+                                     ip_cache, logger, active_ips): vm_name 
                       for vm_name, cfg in configs.items()}
             
             # 40초 타임아웃으로 futures 처리 (연결성 테스트를 위해 20초 여유)
@@ -621,9 +751,10 @@ def main():
     return 0
 
 def process_vm(vm_name: str, cfg: Dict[str, Any], timeout_config: TimeoutConfig, 
-               network_config: NetworkConfig, ssh_manager: SSHManager, 
-               network_utils, linux_manager, windows_manager, ip_cache: IPCache, 
-               logger: logging.Logger, active_ips: List[str]) -> VMProcessResult:
+               network_config: NetworkConfig, wait_config: WaitConfig,
+               performance_config: PerformanceConfig, retry_config: RetryConfig,
+               ssh_manager: SSHManager, network_utils, linux_manager, windows_manager, 
+               ip_cache: IPCache, logger: logging.Logger, active_ips: List[str]) -> VMProcessResult:
     """개별 VM 처리 함수"""
     logger.info(f"[{vm_name}] START")
     
@@ -643,7 +774,8 @@ def process_vm(vm_name: str, cfg: Dict[str, Any], timeout_config: TimeoutConfig,
         
         if not current_ip:
             # ARP에서 IP를 찾지 못한 경우, 대안 방법 시도
-            discovery_strategy = IPDiscoveryStrategy(mac, vm_name, cfg, network_config, timeout_config, logger, active_ips)
+            discovery_strategy = IPDiscoveryStrategy(mac, vm_name, cfg, network_config, timeout_config, 
+                                                   wait_config, performance_config, logger, active_ips)
             current_ip = discovery_strategy.discover()
             if current_ip:
                 ip_cache.set(mac, current_ip)
@@ -663,14 +795,14 @@ def process_vm(vm_name: str, cfg: Dict[str, Any], timeout_config: TimeoutConfig,
         os_type = network_utils.detect_os(current_ip, vm_name, cfg['user'], cfg['pass'], cfg['port'], ssh_manager)
         
         if os_type == 'linux':
-            new_ip = configure_linux_network(current_ip, vm_name, cfg, ssh_manager, linux_manager, logger)
+            new_ip = configure_linux_network(current_ip, vm_name, cfg, ssh_manager, linux_manager, wait_config, logger)
         else:
-            new_ip = configure_windows_network(current_ip, vm_name, cfg, ssh_manager, windows_manager, logger)
+            new_ip = configure_windows_network(current_ip, vm_name, cfg, ssh_manager, windows_manager, wait_config, logger)
         
         # 4) IP 변경 후 재연결
         if os_type == 'linux':
             final_ip = wait_for_ip_change_and_reconnect(current_ip, new_ip, vm_name, 
-                                                       cfg['user'], cfg['pass'], cfg['port'], ssh_manager, logger)
+                                                       cfg['user'], cfg['pass'], cfg['port'], ssh_manager, wait_config, retry_config, logger)
         else:
             final_ip = new_ip
             logger.info(f"[{vm_name}] Using new IP from Windows network configuration: {final_ip}")
@@ -722,7 +854,7 @@ def process_vm(vm_name: str, cfg: Dict[str, Any], timeout_config: TimeoutConfig,
         return VMProcessResult(vm_name=vm_name, success=False, failure_reason=f"처리 중 예외 발생: {str(e)}")
 
 def configure_linux_network(ip: str, vm_name: str, cfg: Dict[str, Any], 
-                           ssh_manager: SSHManager, linux_manager,
+                           ssh_manager: SSHManager, linux_manager, wait_config: WaitConfig,
                            logger: logging.Logger) -> str:
     """Linux VM 네트워크 설정"""
     # 1) 인터페이스와 연결 프로필 감지
@@ -760,7 +892,7 @@ def configure_linux_network(ip: str, vm_name: str, cfg: Dict[str, Any],
         ssh_manager.run_command(ip, cfg['user'], cfg['pass'],
                                f"sudo nmcli device disconnect {iface} && sudo nmcli device connect {iface}", 
                                cfg['port'], vm_name)
-        time.sleep(3)  # 인터페이스 재시작 대기
+        time.sleep(wait_config.interface_restart)  # 인터페이스 재시작 대기
     
     # 4) 새로운 IP 결정
     new_ip = cfg['ip'] if cfg['mode']=='static' else linux_manager.fetch_dhcp_ip(ip, vm_name, cfg['user'], cfg['pass'], cfg['port'], iface, ssh_manager)
@@ -768,7 +900,7 @@ def configure_linux_network(ip: str, vm_name: str, cfg: Dict[str, Any],
     return new_ip
 
 def configure_windows_network(ip: str, vm_name: str, cfg: Dict[str, Any], 
-                             ssh_manager: SSHManager, windows_manager,
+                             ssh_manager: SSHManager, windows_manager, wait_config: WaitConfig,
                              logger: logging.Logger) -> str:
     """Windows VM 네트워크 설정"""
     iface_list = windows_manager.detect_interfaces(ip, cfg['user'], cfg['pass'], cfg['port'], vm_name, ssh_manager)
@@ -787,7 +919,7 @@ def configure_windows_network(ip: str, vm_name: str, cfg: Dict[str, Any],
             
             # DHCP 설정 후 잠시 대기하고 원래 IP로 재연결 시도
             logger.info(f"[{vm_name}] DHCP configuration completed, waiting for IP assignment...")
-            time.sleep(3)  # DHCP 할당 대기
+            time.sleep(wait_config.dhcp_assignment)  # DHCP 할당 대기
             
             # 원래 IP로 재연결 시도
             test_out, _ = ssh_manager.run_command(ip, cfg['user'], cfg['pass'], 'ipconfig', cfg['port'], vm_name)
@@ -810,7 +942,7 @@ def configure_windows_network(ip: str, vm_name: str, cfg: Dict[str, Any],
                 logger.info(f"[{vm_name}] Attempting connection to new static IP: {new_test_ip}")
                 
                 # 네트워크 설정 안정화 대기
-                time.sleep(1.5)  # 대기 시간 단축
+                time.sleep(wait_config.network_stabilization)  # 네트워크 설정 안정화 대기
                 
                 # 새로운 IP로 SSH 연결 시도
                 if windows_manager.verify_connection(new_test_ip, vm_name, cfg['user'], cfg['pass'], cfg['port'], ssh_manager):
@@ -818,7 +950,7 @@ def configure_windows_network(ip: str, vm_name: str, cfg: Dict[str, Any],
                 else:
                     logger.warning(f"[{vm_name}] [FAILED] SSH connection to new static IP {new_test_ip}, will retry with wait")
                     # SSH 실패 시 잠시 대기 후 재시도
-                    time.sleep(1)
+                    time.sleep(wait_config.ip_change)
                     if windows_manager.verify_connection(new_test_ip, vm_name, cfg['user'], cfg['pass'], cfg['port'], ssh_manager):
                         return new_test_ip
                     else:
@@ -836,7 +968,8 @@ def configure_windows_network(ip: str, vm_name: str, cfg: Dict[str, Any],
 
 def wait_for_ip_change_and_reconnect(old_ip: str, new_ip: str, vm_name: str, 
                                    user: str, password: str, port: int, 
-                                   ssh_manager: SSHManager, logger: logging.Logger) -> str:
+                                   ssh_manager: SSHManager, wait_config: WaitConfig, retry_config: RetryConfig,
+                                   logger: logging.Logger) -> str:
     """IP 변경 후 새로운 IP로 재연결을 시도합니다."""
     if old_ip == new_ip:
         logger.info(f"[{vm_name}] IP unchanged ({old_ip}), skipping wait")
@@ -845,19 +978,19 @@ def wait_for_ip_change_and_reconnect(old_ip: str, new_ip: str, vm_name: str,
     logger.info(f"[{vm_name}] IP changed from {old_ip} to {new_ip}, waiting for network stabilization...")
     
     # 네트워크 안정화 대기
-    time.sleep(3)
+    time.sleep(wait_config.network_stabilization)
     
     # 새로운 IP로 SSH 연결 시도
     logger.info(f"[{vm_name}] Attempting SSH connection to new IP {new_ip}")
-    for attempt in range(3):  # 3회 시도
+    for attempt in range(retry_config.ssh_attempts):  # 설정된 횟수만큼 시도
         out, err = ssh_manager.run_command(new_ip, user, password, 'echo "IP change test"', port, vm_name)
         if out is not None:
             logger.info(f"[{vm_name}] [SUCCESS] SSH connection to new IP {new_ip} successful (attempt {attempt + 1})")
             return new_ip
         else:
             logger.warning(f"[{vm_name}] [FAILED] SSH connection to new IP {new_ip} failed (attempt {attempt + 1})")
-            if attempt < 2:
-                time.sleep(2)  # 대기 시간 증가
+            if attempt < retry_config.max_retry_attempts:
+                time.sleep(retry_config.ssh_delay)  # 대기 시간 증가
     
     # 새로운 IP 연결 실패 시 기존 IP로 폴백
     logger.warning(f"[{vm_name}] All SSH attempts to new IP failed, falling back to original IP {old_ip}")

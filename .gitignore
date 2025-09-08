@@ -1,9 +1,10 @@
 # Configuration files
 config.json
+vm_config.json
 
 # Log files
-log/netconfig_improved.log
-log/network_log.json
+logs/netconfig_improved.log
+logs/network_log.json
 
 # Python cache
 __pycache__/
