@@ -838,7 +838,7 @@ def process_vm(vm_name: str, cfg: Dict[str, Any], timeout_config: TimeoutConfig,
             new_ip = configure_linux_network(current_ip, vm_name, cfg, ssh_manager, linux_manager, wait_config, logger, network_utils)
         else:
             # Windows VM도 SSH 사용
-            new_ip = configure_windows_network(current_ip, vm_name, cfg, ssh_manager, windows_manager, wait_config, logger)
+            new_ip = configure_windows_network(current_ip, vm_name, cfg, ssh_manager, windows_manager, wait_config, logger, network_utils)
         
         # 4) IP 변경 후 재연결
         final_ip = wait_for_ip_change_and_reconnect(current_ip, new_ip, vm_name, 
@@ -946,7 +946,7 @@ def configure_linux_network(ip: str, vm_name: str, cfg: Dict[str, Any],
 
 def configure_windows_network(ip: str, vm_name: str, cfg: Dict[str, Any], 
                              ssh_manager: SSHManager, windows_manager, wait_config: WaitConfig,
-                             logger: logging.Logger) -> str:
+                             logger: logging.Logger, network_utils) -> str:
     """Windows VM 네트워크 설정"""
     iface_list = windows_manager.detect_interfaces(ip, cfg['user'], cfg['pass'], cfg['port'], vm_name, ssh_manager)
     success = False
@@ -966,14 +966,24 @@ def configure_windows_network(ip: str, vm_name: str, cfg: Dict[str, Any],
             logger.info(f"[{vm_name}] DHCP configuration completed, waiting for IP assignment...")
             time.sleep(wait_config.dhcp_assignment)  # DHCP 할당 대기
             
-            # 원래 IP로 재연결 시도
-            test_out, _ = ssh_manager.run_command(ip, cfg['user'], cfg['pass'], 'ipconfig', cfg['port'], vm_name)
-            if test_out is not None:
-                logger.info(f"[{vm_name}] [SUCCESS] SSH connection to original IP {ip} successful after DHCP")
-                return ip
+            # DHCP 모드인 경우, ARP 테이블에서 MAC 주소로 새로운 IP를 찾습니다
+            logger.info(f"[{vm_name}] DHCP mode: searching for new IP via ARP table...")
+            # MAC 주소를 가져와서 ARP 테이블에서 정확한 IP를 찾습니다
+            mac = network_utils.get_mac_from_vmx(cfg['vmx'], vm_name)
+            new_ip = windows_manager.fetch_dhcp_ip_via_arp(iface, vm_name, logger, mac, ip)
+            if not new_ip:
+                # ARP에서 찾지 못한 경우 원래 IP로 재연결 시도
+                logger.warning(f"[{vm_name}] ARP search failed, trying original IP...")
+                test_out, _ = ssh_manager.run_command(ip, cfg['user'], cfg['pass'], 'ipconfig', cfg['port'], vm_name)
+                if test_out is not None:
+                    logger.info(f"[{vm_name}] [SUCCESS] SSH connection to original IP {ip} successful after DHCP")
+                    return ip
+                else:
+                    logger.warning(f"[{vm_name}] [FAILED] SSH connection to original IP {ip} failed after DHCP")
+                    return ip  # 실패해도 원래 IP 반환
             else:
-                logger.warning(f"[{vm_name}] [FAILED] SSH connection to original IP {ip} failed after DHCP")
-                return ip  # 실패해도 원래 IP 반환
+                logger.info(f"[{vm_name}] Found new DHCP IP: {new_ip}")
+                return new_ip
         else:
             # 정적 IP 설정
             success = windows_manager.configure_static(ip, vm_name, cfg['user'], cfg['pass'], cfg['port'], iface, cfg, ssh_manager)

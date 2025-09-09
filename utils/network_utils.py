@@ -379,6 +379,81 @@ class WindowsNetworkManager:
             self.logger.error(f"[{vm_name}] DHCP configuration failed for {iface}: {e}")
             return False
     
+    def fetch_dhcp_ip_via_arp(self, iface: str, vm_name: str, logger: logging.Logger, mac: str = None, old_ip: str = None) -> str:
+        """ARP 테이블에서 DHCP로 할당된 새로운 IP를 찾습니다."""
+        import subprocess
+        import re
+        import time
+        
+        try:
+            # ARP 테이블 새로고침을 위해 잠시 대기
+            time.sleep(2)
+            
+            # ARP 테이블에서 192.168.32.x 대역의 IP들을 찾습니다
+            result = subprocess.run(['arp', '-a'], capture_output=True, text=True, timeout=10)
+            if result.returncode != 0:
+                logger.warning(f"[{vm_name}] ARP table lookup failed")
+                return None
+            
+            arp_output = result.stdout
+            
+            if mac:
+                # MAC 주소가 제공된 경우, 해당 MAC으로 IP를 찾습니다
+                mac_pattern = mac.lower().replace(':', '-')
+                
+                for line in arp_output.split('\n'):
+                    if mac_pattern in line.lower():
+                        ip_match = re.search(r'192\.168\.32\.(\d{1,3})', line)
+                        if ip_match:
+                            new_ip = f"192.168.32.{ip_match.group(1)}"
+                            if old_ip and new_ip == old_ip:
+                                # IP가 변경되지 않았으면 잠시 더 대기
+                                logger.info(f"[{vm_name}] DHCP IP same as old IP: {new_ip}, waiting for change...")
+                                time.sleep(3)
+                                # 다시 ARP 테이블 확인
+                                result2 = subprocess.run(['arp', '-a'], capture_output=True, text=True, timeout=10)
+                                if result2.returncode == 0:
+                                    arp_output2 = result2.stdout
+                                    for line2 in arp_output2.split('\n'):
+                                        if mac_pattern in line2.lower():
+                                            ip_match2 = re.search(r'192\.168\.32\.(\d{1,3})', line2)
+                                            if ip_match2:
+                                                new_ip2 = f"192.168.32.{ip_match2.group(1)}"
+                                                if new_ip2 != old_ip:
+                                                    logger.info(f"[{vm_name}] Found new DHCP IP via ARP for MAC {mac}: {new_ip2}")
+                                                    return new_ip2
+                                return old_ip  # 변경되지 않았으면 기존 IP 반환
+                            else:
+                                logger.info(f"[{vm_name}] Found DHCP IP via ARP for MAC {mac}: {new_ip}")
+                                return new_ip
+                
+                logger.warning(f"[{vm_name}] No IP found for MAC {mac} in ARP table")
+                return None
+            else:
+                # MAC 주소가 없는 경우, 192.168.32.x 대역의 IP들을 찾습니다
+                ip_pattern = r'192\.168\.32\.(\d{1,3})'
+                found_ips = []
+                
+                for line in arp_output.split('\n'):
+                    ip_match = re.search(ip_pattern, line)
+                    if ip_match:
+                        ip = f"192.168.32.{ip_match.group(1)}"
+                        if ip not in found_ips:
+                            found_ips.append(ip)
+                
+                if found_ips:
+                    # 가장 높은 IP를 선택 (일반적으로 최신 할당)
+                    latest_ip = max(found_ips, key=lambda x: int(x.split('.')[-1]))
+                    logger.info(f"[{vm_name}] Found potential DHCP IP via ARP: {latest_ip}")
+                    return latest_ip
+                else:
+                    logger.warning(f"[{vm_name}] No 192.168.32.x IPs found in ARP table")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"[{vm_name}] Error in fetch_dhcp_ip_via_arp: {e}")
+            return None
+    
     def configure_static(self, ip: str, vm_name: str, user: str, password: str, port: int, 
                         iface: str, cfg: Dict[str, Any], ssh_manager) -> bool:
         """정적 IP 설정"""
