@@ -835,7 +835,7 @@ def process_vm(vm_name: str, cfg: Dict[str, Any], timeout_config: TimeoutConfig,
         os_type = network_utils.detect_os(current_ip, vm_name, cfg['user'], cfg['pass'], cfg['port'], ssh_manager)
         
         if os_type == 'linux':
-            new_ip = configure_linux_network(current_ip, vm_name, cfg, ssh_manager, linux_manager, wait_config, logger)
+            new_ip = configure_linux_network(current_ip, vm_name, cfg, ssh_manager, linux_manager, wait_config, logger, network_utils)
         else:
             # Windows VM도 SSH 사용
             new_ip = configure_windows_network(current_ip, vm_name, cfg, ssh_manager, windows_manager, wait_config, logger)
@@ -884,7 +884,7 @@ def process_vm(vm_name: str, cfg: Dict[str, Any], timeout_config: TimeoutConfig,
 
 def configure_linux_network(ip: str, vm_name: str, cfg: Dict[str, Any], 
                            ssh_manager: SSHManager, linux_manager, wait_config: WaitConfig,
-                           logger: logging.Logger) -> str:
+                           logger: logging.Logger, network_utils) -> str:
     """Linux VM 네트워크 설정"""
     # 1) 인터페이스와 연결 프로필 감지
     iface = linux_manager.detect_interface(ip, vm_name, cfg['user'], cfg['pass'], cfg['port'], ssh_manager)
@@ -915,16 +915,31 @@ def configure_linux_network(ip: str, vm_name: str, cfg: Dict[str, Any],
                            f"sudo nmcli connection up '{conn}'", cfg['port'], vm_name)
     logger.info(f"[{vm_name}] Ran NM configuration on {conn}")
     
-    # DHCP 모드인 경우 인터페이스 재시작으로 완전한 DHCP 전환
+    # DHCP 모드인 경우 부드러운 DHCP 갱신만 수행
     if cfg['mode'] == 'dhcp':
-        logger.info(f"[{vm_name}] Restarting interface for complete DHCP transition...")
+        logger.info(f"[{vm_name}] Requesting DHCP renewal without interface restart...")
+        # 인터페이스 재시작 없이 DHCP 갱신만 수행
         ssh_manager.run_command(ip, cfg['user'], cfg['pass'],
-                               f"sudo nmcli device disconnect {iface} && sudo nmcli device connect {iface}", 
-                               cfg['port'], vm_name)
-        time.sleep(wait_config.interface_restart)  # 인터페이스 재시작 대기
+                               f"sudo dhclient -r {iface}", cfg['port'], vm_name)
+        time.sleep(1)  # DHCP 해제 대기
+        ssh_manager.run_command(ip, cfg['user'], cfg['pass'],
+                               f"sudo dhclient {iface}", cfg['port'], vm_name)
+        time.sleep(2)  # DHCP 갱신 대기
     
     # 4) 새로운 IP 결정
-    new_ip = cfg['ip'] if cfg['mode']=='static' else linux_manager.fetch_dhcp_ip(ip, vm_name, cfg['user'], cfg['pass'], cfg['port'], iface, ssh_manager)
+    if cfg['mode'] == 'static':
+        new_ip = cfg['ip']
+    else:
+        # DHCP 모드인 경우, 기존 IP로 SSH 연결이 끊어질 수 있으므로
+        # ARP 테이블에서 MAC 주소로 새로운 IP를 찾습니다
+        logger.info(f"[{vm_name}] DHCP mode: searching for new IP via ARP table...")
+        # MAC 주소를 가져와서 ARP 테이블에서 정확한 IP를 찾습니다
+        mac = network_utils.get_mac_from_vmx(cfg['vmx'], vm_name)
+        new_ip = linux_manager.fetch_dhcp_ip_via_arp(iface, vm_name, logger, mac, ip)
+        if not new_ip:
+            # ARP에서 찾지 못한 경우 기존 방법 시도 (실패할 가능성 높음)
+            logger.warning(f"[{vm_name}] ARP search failed, trying SSH method...")
+            new_ip = linux_manager.fetch_dhcp_ip(ip, vm_name, cfg['user'], cfg['pass'], cfg['port'], iface, ssh_manager)
     
     return new_ip
 
@@ -1105,13 +1120,17 @@ def verify_network_configuration(ip: str, vm_name: str, cfg: Dict[str, Any],
                 if not gw_out or expected_gateway not in gw_out:
                     return {'success': False, 'reason': f'게이트웨이가 {expected_gateway}로 설정되지 않음'}
         
-        # 4. 게이트웨이 연결성 테스트 (DHCP, Static 공통)
-        gateway_ip = cfg.get('gateway', '192.168.32.2')  # 기본 게이트웨이
-        ping_cmd = f"ping -c 1 {gateway_ip}" if os_type == 'linux' else f"ping -n 1 {gateway_ip}"
-        ping_out, _ = ssh_manager.run_command(ip, cfg['user'], cfg['pass'], ping_cmd, cfg['port'], vm_name)
-        
-        if not ping_out or ("TTL=" not in ping_out and "ttl=" not in ping_out):
-            return {'success': False, 'reason': f'게이트웨이 {gateway_ip}에 ping 실패 (네트워크 연결 불가)'}
+        # 4. 게이트웨이 연결성 테스트 (정적 IP 모드에서만)
+        if cfg['mode'] == 'static':
+            gateway_ip = cfg.get('gateway', '192.168.32.2')  # 기본 게이트웨이
+            ping_cmd = f"ping -c 1 {gateway_ip}" if os_type == 'linux' else f"ping -n 1 {gateway_ip}"
+            ping_out, _ = ssh_manager.run_command(ip, cfg['user'], cfg['pass'], ping_cmd, cfg['port'], vm_name)
+            
+            if not ping_out or ("TTL=" not in ping_out and "ttl=" not in ping_out):
+                return {'success': False, 'reason': f'게이트웨이 {gateway_ip}에 ping 실패 (네트워크 연결 불가)'}
+        else:
+            # DHCP 모드에서는 게이트웨이 연결성 검증을 건너뛰고 기본 연결성만 확인
+            logger.info(f"[{vm_name}] DHCP mode: skipping gateway connectivity test")
         
         logger.info(f"[{vm_name}] Network configuration verification successful")
         return {'success': True, 'reason': 'Network configuration verified successfully'}

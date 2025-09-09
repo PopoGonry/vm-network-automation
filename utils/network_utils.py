@@ -236,6 +236,81 @@ class LinuxNetworkManager:
         self.logger.warning(f"[{vm_name}] No new IP found, using original IP: {ip}")
         return ip
     
+    def fetch_dhcp_ip_via_arp(self, iface: str, vm_name: str, logger: logging.Logger, mac: str = None, old_ip: str = None) -> str:
+        """ARP 테이블에서 DHCP로 할당된 새로운 IP를 찾습니다."""
+        import subprocess
+        import re
+        import time
+        
+        try:
+            # ARP 테이블 새로고침을 위해 잠시 대기
+            time.sleep(2)
+            
+            # ARP 테이블에서 192.168.32.x 대역의 IP들을 찾습니다
+            result = subprocess.run(['arp', '-a'], capture_output=True, text=True, timeout=10)
+            if result.returncode != 0:
+                logger.warning(f"[{vm_name}] ARP table lookup failed")
+                return None
+            
+            arp_output = result.stdout
+            logger.debug(f"[{vm_name}] ARP table output:\n{arp_output}")
+            
+            if mac:
+                # MAC 주소가 제공된 경우, 해당 MAC의 IP를 찾습니다
+                mac_pattern = mac.replace(':', '-').lower()
+                lines = arp_output.split('\n')
+                
+                for line in lines:
+                    if mac_pattern in line.lower():
+                        # IP 주소 추출
+                        ip_match = re.search(r'192\.168\.32\.(\d{1,3})', line)
+                        if ip_match:
+                            new_ip = f"192.168.32.{ip_match.group(1)}"
+                            
+                            # 기존 IP와 다른 경우에만 새로운 IP로 간주
+                            if old_ip and new_ip == old_ip:
+                                logger.info(f"[{vm_name}] DHCP IP same as old IP: {new_ip}, waiting for change...")
+                                # 잠시 더 대기 후 다시 시도
+                                time.sleep(3)
+                                result2 = subprocess.run(['arp', '-a'], capture_output=True, text=True, timeout=10)
+                                if result2.returncode == 0:
+                                    arp_output2 = result2.stdout
+                                    for line2 in arp_output2.split('\n'):
+                                        if mac_pattern in line2.lower():
+                                            ip_match2 = re.search(r'192\.168\.32\.(\d{1,3})', line2)
+                                            if ip_match2:
+                                                new_ip2 = f"192.168.32.{ip_match2.group(1)}"
+                                                if new_ip2 != old_ip:
+                                                    logger.info(f"[{vm_name}] Found new DHCP IP via ARP for MAC {mac}: {new_ip2}")
+                                                    return new_ip2
+                                return old_ip  # 변경되지 않았으면 기존 IP 반환
+                            else:
+                                logger.info(f"[{vm_name}] Found DHCP IP via ARP for MAC {mac}: {new_ip}")
+                                return new_ip
+                
+                logger.warning(f"[{vm_name}] No IP found for MAC {mac} in ARP table")
+                return None
+            else:
+                # MAC 주소가 없는 경우, 192.168.32.x 대역의 IP들을 찾습니다
+                ip_pattern = r'192\.168\.32\.(\d{1,3})'
+                matches = re.findall(ip_pattern, arp_output)
+                
+                if matches:
+                    # 가장 높은 IP를 선택 (일반적으로 최신 DHCP 할당)
+                    ip_numbers = [int(match) for match in matches]
+                    max_ip_num = max(ip_numbers)
+                    new_ip = f"192.168.32.{max_ip_num}"
+                    
+                    logger.info(f"[{vm_name}] Found potential DHCP IP via ARP: {new_ip}")
+                    return new_ip
+                else:
+                    logger.warning(f"[{vm_name}] No 192.168.32.x IPs found in ARP table")
+                    return None
+                
+        except Exception as e:
+            logger.error(f"[{vm_name}] Error during ARP lookup: {e}")
+            return None
+    
     def _validate_ip(self, ip_str: str) -> bool:
         """IP 주소 형식을 검증합니다."""
         try:
@@ -294,9 +369,9 @@ class WindowsNetworkManager:
         """DHCP 설정"""
         try:
             out1, err1 = ssh_manager.run_command(ip, user, password, 
-                                                f'netsh interface ip set address "{iface}" dhcp', port, vm_name, extended_timeout=True)
+                                                f'netsh interface ip set address "{iface}" dhcp', port, vm_name)
             out2, err2 = ssh_manager.run_command(ip, user, password, 
-                                                f'netsh interface ip set dns "{iface}" dhcp', port, vm_name, extended_timeout=True)
+                                                f'netsh interface ip set dns "{iface}" dhcp', port, vm_name)
             
             self.logger.info(f"[{vm_name}] DHCP configuration completed for {iface}")
             return True
