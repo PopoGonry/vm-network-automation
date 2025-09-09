@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 개선된 네트워크 설정 자동화 스크립트
 VMware VM들의 네트워크 설정을 자동화하는 도구
 
-주요 개선사항:
-- 타입 힌트 추가
-- 예외 클래스 정의
-- 설정 검증 강화
-- 모듈화된 구조
-- 캐싱 시스템
-- 하드코딩 제거
 """
 
 import json
@@ -28,6 +22,16 @@ from datetime import datetime
 from typing import Optional, Dict, List, Tuple, Any
 from dataclasses import dataclass
 from pathlib import Path
+
+# 인코딩 설정
+if sys.platform == 'win32':
+    import codecs
+    try:
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.detach())
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.detach())
+    except AttributeError:
+        # detach() 메서드가 없는 경우 (일부 Windows 환경)
+        pass
 
 # === Configuration ===
 CONFIG_FILE = 'config.json'
@@ -399,6 +403,7 @@ class SSHManager:
         vm_prefix = f"[{vm_name}] " if vm_name else ""
         self.logger.debug(f"{vm_prefix}SSH {ip}:{port} => {command}")
         
+        client = None
         try:
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -413,11 +418,19 @@ class SSHManager:
             stdin.flush()
             out = stdout.read().decode(errors='ignore')
             err = stderr.read().decode(errors='ignore')
-            client.close()
             return out.strip(), err.strip()
         except Exception as e:
-            self.logger.error(f"{vm_prefix}SSH error on {ip}:{port}: {e}")
+            # 소켓 예외는 로그에 기록하지 않음 (정상적인 연결 종료)
+            if "강제로 끊겼습니다" not in str(e) and "Connection reset" not in str(e):
+                self.logger.error(f"{vm_prefix}SSH error on {ip}:{port}: {e}")
             return None, None
+        finally:
+            # 안전하게 연결 종료
+            if client:
+                try:
+                    client.close()
+                except:
+                    pass
     
     def run_with_retry(self, ip: str, user: str, password: str, command: str, 
                       port: int = 22, vm_name: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
@@ -770,6 +783,10 @@ def main():
     
     # 전체 결과 요약 출력 (맨 마지막, 소요 시간 포함)
     print_final_summary(vm_results, total_duration, connectivity_matrix, logger)
+    
+    # 프로그램 종료 전 대기
+    print("\n프로그램이 완료되었습니다.")
+    input("아무 키나 누르면 종료됩니다...")
     
     return 0
 

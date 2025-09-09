@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 네트워크 유틸리티 함수들
 VM 네트워크 설정에 필요한 공통 함수들을 제공합니다.
@@ -9,8 +10,19 @@ import re
 import time
 import logging
 import threading
+import sys
 from typing import Optional, List, Tuple, Dict, Any
 from dataclasses import dataclass
+
+# 인코딩 설정
+if sys.platform == 'win32':
+    import codecs
+    try:
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.detach())
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.detach())
+    except AttributeError:
+        # detach() 메서드가 없는 경우 (일부 Windows 환경)
+        pass
 
 # Lock for ARP lookups
 arp_lock = threading.Lock()
