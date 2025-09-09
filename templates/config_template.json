@@ -8,10 +8,10 @@
   },
   "timeouts": {
     "ssh_connection": 1,
-    "network_scan": 0.1,
-    "ping_short": 10,
-    "ping_medium": 20,
-    "ping_long": 30
+    "network_scan": 2,
+    "ping_short": 100,
+    "ping_medium": 200,
+    "ping_long": 500
   },
   "retry": {
     "ssh_attempts": 6,

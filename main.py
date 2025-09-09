@@ -79,10 +79,10 @@ class VMProcessResult:
 class TimeoutConfig:
     """타임아웃 설정을 관리하는 클래스"""
     ssh_connection: int = 1
-    network_scan: float = 1
-    ping_short: int = 50
-    ping_medium: int = 100
-    ping_long: int = 200
+    network_scan: float = 2
+    ping_short: int = 100
+    ping_medium: int = 200
+    ping_long: int = 500
     
     def load_from_config(self, config: Dict[str, Any]) -> None:
         """설정에서 타임아웃 값 로드"""
@@ -769,9 +769,11 @@ def main():
     end_time = datetime.now()
     total_duration = end_time - start_time
     
-    # 로그 요약 먼저 출력
+    # 로그 요약 먼저 출력 (VM 이름 순으로 정렬)
     logger.info(f"=== FINAL SUMMARY: {len([r for r in vm_results if r.success])}/{len(vm_results)} VMs configured successfully ===")
-    for result in vm_results:
+    # VM 이름 순으로 정렬
+    sorted_vm_results = sorted(vm_results, key=lambda x: x.vm_name)
+    for result in sorted_vm_results:
         if result.success:
             logger.info(f"SUCCESS: {result.vm_name} -> {result.final_ip} ({result.os_type})")
         else:
@@ -1264,14 +1266,18 @@ def test_all_vm_connectivity(configs: Dict[str, Any], vm_results: Dict[str, Any]
         )
         connectivity_matrix[vm_name] = results
     
-    # 결과 요약
+    # 결과 요약 (VM 이름 순으로 정렬)
     logger.info("=== Connectivity Test Summary ===")
-    for vm_name, connections in connectivity_matrix.items():
+    # VM 이름 순으로 정렬
+    sorted_connectivity_items = sorted(connectivity_matrix.items())
+    for vm_name, connections in sorted_connectivity_items:
         successful = sum(1 for connected in connections.values() if connected)
         total = len(connections)
         logger.info(f"[{vm_name}] Connected to {successful}/{total} VMs")
         
-        for target_vm, connected in connections.items():
+        # 대상 VM들도 정렬
+        sorted_connections = sorted(connections.items())
+        for target_vm, connected in sorted_connections:
             status = "[SUCCESS]" if connected else "[FAILED]"
             logger.info(f"  {status} {vm_name} -> {target_vm}")
     
@@ -1298,10 +1304,12 @@ def print_final_summary(vm_results: List[VMProcessResult], total_duration, conne
     print(f"   - 실패: {failure_count} ({failure_count/total_vms*100:.1f}%)")
     print(f"   - 총 소요 시간: {total_duration}")
     
-    # 성공한 VM들
+    # 성공한 VM들 (VM 이름 순으로 정렬)
     if successful_vms:
         print(f"\n성공한 VM들 ({success_count}개):")
-        for result in successful_vms:
+        # VM 이름 순으로 정렬
+        sorted_successful_vms = sorted(successful_vms, key=lambda x: x.vm_name)
+        for result in sorted_successful_vms:
             connectivity_text = "연결됨" if result.reachable else "연결 확인 필요"
             original_info = f" (원래: {result.original_ip})" if result.original_ip and result.original_ip != result.final_ip else ""
             
@@ -1310,7 +1318,8 @@ def print_final_summary(vm_results: List[VMProcessResult], total_duration, conne
     # VM 간 연결성 매트릭스
     if connectivity_matrix and len(connectivity_matrix) > 1:
         print(f"\nVM 간 연결성 매트릭스:")
-        vm_names = list(connectivity_matrix.keys())
+        # VM 이름 순으로 정렬
+        vm_names = sorted(connectivity_matrix.keys())
         
         # 헤더 출력
         print(f"   {'From/To':<12}", end="")
@@ -1356,11 +1365,15 @@ def print_final_summary(vm_results: List[VMProcessResult], total_duration, conne
         if len(connected_groups) == 1:
             print("   모든 VM이 하나의 네트워크 그룹에 연결되어 있습니다.")
             group = connected_groups[0]
-            print(f"   연결된 VM들: {' <-> '.join(group)}")
+            # VM 이름 순으로 정렬
+            sorted_group = sorted(group)
+            print(f"   연결된 VM들: {' <-> '.join(sorted_group)}")
         else:
             print(f"   {len(connected_groups)}개의 분리된 네트워크 그룹이 발견되었습니다:")
             for i, group in enumerate(connected_groups):
-                print(f"   그룹 {i+1}: {' <-> '.join(group)}")
+                # VM 이름 순으로 정렬
+                sorted_group = sorted(group)
+                print(f"   그룹 {i+1}: {' <-> '.join(sorted_group)}")
     
     # 실패한 VM들
     if failed_vms:
@@ -1376,7 +1389,9 @@ def print_final_summary(vm_results: List[VMProcessResult], total_duration, conne
         
         for reason, vm_names in failure_categories.items():
             print(f"\n   실패 원인: {reason}")
-            for vm_name in vm_names:
+            # VM 이름 순으로 정렬
+            sorted_vm_names = sorted(vm_names)
+            for vm_name in sorted_vm_names:
                 print(f"      - {vm_name}")
     
     # 권장사항
